@@ -9,11 +9,49 @@
 require(pacman)
 p_load(RMySQL, dplyr, reshape2, ggplot2, grid, gridExtra, ROCR, randomForest, gam)
 
-#load tableau color palette
+sessionInfo()
+# R version 3.2.3 (2015-12-10)
+# Platform: x86_64-apple-darwin13.4.0 (64-bit)
+# Running under: OS X 10.11.5 (El Capitan)
+# 
+# locale:
+#   [1] en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
+# 
+# attached base packages:
+#   [1] splines   grid      stats     graphics  grDevices utils     datasets  methods   base     
+# 
+# other attached packages:
+#   [1] gam_1.12            foreach_1.4.3       randomForest_4.6-12 ROCR_1.0-7         
+# [5] gplots_3.0.1        gridExtra_2.2.1     ggplot2_2.1.0       reshape2_1.4.1     
+# [9] dplyr_0.4.3         RMySQL_0.10.8       DBI_0.3.1           pacman_0.4.1       
+# 
+# loaded via a namespace (and not attached):
+#   [1] Rcpp_0.12.4        magrittr_1.5       munsell_0.4.3      colorspace_1.2-6  
+# [5] R6_2.1.2           stringr_1.0.0      plyr_1.8.3         caTools_1.17.1    
+# [9] tools_3.2.3        parallel_3.2.3     gtable_0.2.0       KernSmooth_2.23-15
+# [13] iterators_1.0.8    gtools_3.5.0       assertthat_0.1     codetools_0.2-14  
+# [17] bitops_1.0-6       gdata_2.17.0       stringi_1.0-1      scales_0.4.0   
+
+# load tableau color palette
 source("https://raw.githubusercontent.com/BillPetti/R-Plotting-Resources/master/tableau_colorblind_palette")
 
-#load custom confusion matrix and classification model evaluation function
+# load custom ggplot2 theme
+source("https://raw.githubusercontent.com/BillPetti/R-Plotting-Resources/master/theme_bp_grey")
+
+# load custom confusion matrix and classification model evaluation function
 source("/Users/williampetti/General-Code-Reference/confusionMatrix.R")
+
+# function for finding the optimal cut-off value for classification
+# source: https://hopstat.wordpress.com/2014/12/19/a-small-introduction-to-the-rocr-package/
+
+opt.cut <- function(perf, pred){
+  cut.ind = mapply(FUN=function(x, y, p){
+    d = (x - 0)^2 + (y-1)^2
+    ind = which(d == min(d))
+    c(sensitivity = y[[ind]], specificity = 1-x[[ind]], 
+      cutoff = p[[ind]])
+  }, perf@x.values, perf@y.values, pred@cutoffs)
+}
 
 # Load connection information for the FanGraphs database
 
@@ -51,7 +89,9 @@ scrape_statcast <- function(batter, year) {
 
 # pull separate data for the 2015 and 2016 seasons
 
-statcast.2016 <- mlbamid.df.2016 %>% group_by(batter, year) %>% do(scrape_statcast(.$batter,.$year))
+statcast <- mlbamid.df.2016 %>% group_by(batter, year) %>% do(scrape_statcast(.$batter,.$year))
+
+statcast.2016 <- statacst
 
 # code if the batted ball resulted in a hit or an out
 
@@ -185,36 +225,38 @@ plot(rf.2)
 
 varImpPlot(rf.2)
 
-# predict_fit.rf.2 <- data.frame(fits = predict(rf.2, train, type = "prob")[,2], actuals = train$hit)
-# 
-# pred.rf.2 <- prediction(predict_fit.rf.2$fits, predict_fit.rf.2$actuals)
-# 
-# roc.pred.rf.2 <- performance(pred.rf.2, measure = "tpr", x.measure = "fpr")
-# 
-# plot(roc.pred.rf.2)
-# 
-# abline(a = 0, b = 1)
-# 
-# rf.2.opt <- opt.cut(roc.pred.rf.2, pred.rf.2)
-# 
-# rf.2.opt
-# 
-# rf.2.opt <- rf.2.opt[3]
-# 
-# predict_fit.rf.2$fits <- with(predict_fit.rf.2, ifelse(fits > rf.2.opt, 1, 0)) 
+predict_fit.rf.2 <- data.frame(fits = predict(rf.2, test, type = "prob")[,2], actuals = test$hit)
+
+pred.rf.2 <- prediction(predict_fit.rf.2$fits, predict_fit.rf.2$actuals)
+
+roc.pred.rf.2 <- performance(pred.rf.2, measure = "tpr", x.measure = "fpr")
+
+plot(roc.pred.rf.2)
+
+abline(a = 0, b = 1)
+
+rf.2.opt <- opt.cut(roc.pred.rf.2, pred.rf.2)
+
+rf.2.opt
+
+rf.2.opt <- rf.2.opt[3]
+
+predict_fit.rf.2$fits <- with(predict_fit.rf.2, ifelse(fits > rf.2.opt, 1, 0)) 
 
 rf.2_confusion_test <- confusionMatrix(model = rf.2, x = test, y = test$hit)
 
 #           fits
 # actuals     0     1
-#       0 10417   494
-#       1   905  5095
+#       0 10206   505
+#       1   897  4955
 #                     V1
-# sensitivity      0.849
-# precision        0.912
-# specificity      0.955
-# overall_accuracy 0.917
-# f1_measure       0.879
+# sensitivity      0.847
+# precision        0.908
+# specificity      0.953
+# overall_accuracy 0.915
+# f1_measure       0.876
+
+confusionMatrix(df = predict_fit.rf.2)
 
 rf.2.cv <- rfcv(train[,c(5:9)], as.factor(train[,1]), cv.fold = 5)
 
@@ -269,19 +311,19 @@ rf.3_confusion <- confusionMatrix(model = rf.3, x = test, y = test$hit)
 
 # examine whether the model is missing systematically for certain records
 
-test_set_rows <- test$row
-
-rf.2_full_test_data <- cbind(filter(working_data, row %in% test_set_rows), predict_fit.rf.2$fits)
-
-names(rf.2_full_test_data)[12] <- "fits"
-
-rf.2_mean_table <- select(rf.2_full_test_data, -rows) %>% 
-  group_by(hit, fits) %>%
-  summarise_each(funs(mean(., na.rm = TRUE),n()))
-
-rf.2_full_test_data$type <- with(rf.2_full_test_data, ifelse(hit == fits, 1, 0))
-
-rf.2_full_test_data$hit_label <- with(rf.2_full_test_data, ifelse(hit == 1, "Hit", "Out"))
+# test_set_rows <- test$row
+# 
+# rf.2_full_test_data <- cbind(filter(working_data, row %in% test_set_rows), predict_fit.rf.2$fits)
+# 
+# names(rf.2_full_test_data)[12] <- "fits"
+# 
+# rf.2_mean_table <- select(rf.2_full_test_data, -rows) %>% 
+#   group_by(hit, fits) %>%
+#   summarise_each(funs(mean(., na.rm = TRUE),n()))
+# 
+# rf.2_full_test_data$type <- with(rf.2_full_test_data, ifelse(hit == fits, 1, 0))
+# 
+# rf.2_full_test_data$hit_label <- with(rf.2_full_test_data, ifelse(hit == 1, "Hit", "Out"))
 
 # plot the performance of the model based on the three features included
 
@@ -436,13 +478,19 @@ pred_prob_hit_fits <- cbind(pred_data_emp, pred_prob_hit)
 
 angle_speed_pred <- pred_prob_hit_fits %>% ggplot(aes(hit_speed, hit_angle)) + geom_tile(aes(fill = pred_prob_hit), alpha = .5, size = .05, color = "white") + scale_fill_gradient(low = "#006BA4", high = "#C85200", "Probability\nof Hit\n", labels = percent) + xlab("\nSpeed off the Bat") + ylab("Launch Angle\n") + ggtitle("\nPredicted Probability of a Hit Using Statcast Data (2016)\n") + theme_bp_grey()
 
+angle_speed_pred
+
 ggsave("angle_speed_pred.png", angle_speed_pred, scale = 1.2, width = 11, height = 8.5, units = "in")
 
 angle_dist_pred <- pred_prob_hit_fits %>% ggplot(aes(hit_distance_sc, hit_angle)) + geom_tile(aes(fill = pred_prob_hit), alpha = .5, size = .05, color = "white") + scale_fill_gradient(low = "#006BA4", high = "#C85200", "Probability\nof Hit\n", labels = percent) + xlab("\nBatted Ball Distance") + ylab("Launch Angle\n") + ggtitle("\nPredicted Probability of a Hit Using Statcast Data (2016)\n") + theme_bp_grey()
 
+angle_dist_pred
+
 ggsave("angle_dist_pred.png", angle_dist_pred, scale = 1.2, width = 11, height = 8.5, units = "in")
 
 speed_dist_pred <- pred_prob_hit_fits %>% ggplot(aes(hit_distance_sc, hit_speed)) + geom_tile(aes(fill = pred_prob_hit), alpha = .5, size = .05, color = "white") + scale_fill_gradient(low = "#006BA4", high = "#C85200", "Probability\nof Hit\n", labels = percent) + xlab("\nBatted Ball Distance") + ylab("Speed off the Bat\n") + ggtitle("\nPredicted Probability of a Hit Using Statcast Data (2016)\n") + theme_bp_grey()
+
+speed_dist_pred
 
 ggsave("speed_dist_pred.png", speed_dist_pred, scale = 1.2, width = 11, height = 8.5, units = "in")
 
@@ -477,9 +525,11 @@ compare_prob <- left_join(pred_prob_by_buckets, empirical_prob_hit, by = c("angl
 compare_lm <- lm(empirical_ave ~ ave_prob, data = compare_prob)
 
 summary(compare_lm)$sigma 
-# RMSE = [1] 0.1121632
+# RMSE = [1] 0.0100505
 
-compare_prob_plot <- compare_prob %>% ggplot(aes(ave_prob, empirical_ave)) + geom_point(aes(size = count), alpha = .5, color = "#006BA4") + stat_smooth(method = "lm", color = "#C85200") + scale_x_continuous(labels = percent) + scale_y_continuous(limits = c(0,1), labels = percent)+ xlab("\nPredicted Batting Average") + ylab("Empirical Batting Average\n") + ggtitle("\nPredicted vs. Empirical Batting Average: Statcast Data (2016)\n") + annotate(geom = "text", x = .94, y = .80, label = "RMSE = .112", fontface = "bold") + theme_bp_grey()
+require(scales)
+
+compare_prob_plot <- compare_prob %>% ggplot(aes(ave_prob, empirical_ave)) + geom_point(aes(size = count), alpha = .5, color = "#006BA4") + stat_smooth(method = "lm", color = "#C85200") + scale_x_continuous(labels = percent) + scale_y_continuous(limits = c(0,1), labels = percent)+ xlab("\nPredicted Batting Average") + ylab("Empirical Batting Average\n") + ggtitle("\nPredicted vs. Empirical Batting Average: Statcast Data (2016)\n") + annotate(geom = "text", x = .94, y = .80, label = paste0("RMSE = ",round(summary(compare_lm)$sigma,2)), fontface = "bold") + theme_bp_grey()
 
 compare_prob_plot
 
@@ -487,8 +537,8 @@ ggsave("compare_prob_plot.png", compare_prob_plot, scale = 1.2, width = 11, heig
 
 # apply predictive model to all Statcast data in 2016
 
-statcast.2016.scaled <- rbind(test, train) %>%
-  arrange(row)
+# statcast.2016.scaled <- rbind(test, train) %>%
+#   arrange(row)
 
 # statcast.2016.scaled$hit_distance_sc <- (statcast.2016.scaled$hit_distance_sc - center_values[1]) / scale_values[1]
 # 
@@ -500,14 +550,17 @@ statcast.2016.scaled <- rbind(test, train) %>%
 # 
 # statcast.2016.scaled$hc_y <- (statcast.2016.scaled$hc_y - center_values[5]) / scale_values[5]
 
-statcast.2016.fit <- predict(rf.2, statcast.2016.scaled, type = "prob")[,2] %>%
+statcast.2016.fit <- predict(rf.2, test, type = "response") %>%
   as.data.frame()
-statcast.2016.scaled <- cbind(statcast.2016.scaled, statcast.2016.fit)
+statcast.2016.scaled <- cbind(test, statcast.2016.fit)
 names(statcast.2016.scaled)[11] <- "fit" 
+
 statcast.2016.predicted <- left_join(
   select(statcast.2016.scaled, row, fit),
   statcast.2016, by = "row") %>%
-  mutate(fit_dummy = with(., ifelse(fit > rf.2.opt, 1, 0)))
+  mutate(fit_dummy = fit)
+
+statcast.2016.predicted$fit_dummy <- as.character(statcast.2016.predicted$fit_dummy) %>% as.numeric()           
 
 with(statcast.2016.predicted, table(hit, fit_dummy))
 
@@ -520,13 +573,11 @@ conversion_by_team <- filter(statcast.2016.predicted, events != "Home Run") %>%
   summarise(unexpected_plays = round(sum(ifelse(fit_dummy == 1 & hit == 0, 1, NA)/sum(fit_dummy), na.rm = TRUE),3), efficiency = round((length(hit)-sum(hit))/(length(hit)-sum(fit_dummy)),3)) %>%
   arrange(desc(efficiency))
 
-write.csv(conversion_by_team, "conversion_by_team.csv", row.names = FALSE)            
 conversion_by_team_plot <- ungroup(conversion_by_team) %>% ggplot(aes(efficiency, unexpected_plays)) + geom_text(aes(label = fieldingTeam), color = "#006BA4", fontface = "bold") + stat_smooth(method = "lm", color = "#C85200") + scale_x_continuous(labels = percent) + scale_y_continuous(labels = percent)+ xlab("\n% of Expected Outs Made") + ylab("% of Unexpected Outs Converted\n") + ggtitle("\nExpected Outs vs. Unexpected Outs: Statcast Data (2016)\n") + theme_bp_grey()
 
 conversion_by_team_plot
 
-ggsave("conversion_by_team_plot.png", conversion_by_team_plot, scale = 1.2, width = 11, height = 8.5, units = "in")
-
+write.csv(conversion_by_team, "conversion_by_team.csv", row.names = FALSE)            
 # plot batted ball location
 
 statcast.2016.predicted$miss <- with(statcast.2016.predicted, ifelse(hit != fit_dummy, "Incorrect", "Correct"))
@@ -535,7 +586,7 @@ statcast.2016.predicted$hit_label <- with(statcast.2016.predicted, ifelse(hit ==
 
 tab_condensed_factor <- c("#C85200","#006BA4")
 
-misses_plotted <- statcast.2016.predicted %>% 
+misses_plotted <- filter(statcast.2016.predicted, !is.na(miss)) %>% 
   ggplot(aes(x = hc_x, y = (hc_y*-1))) + 
   geom_point(aes(color = as.factor(hit_label)), alpha = .5) + 
   xlim(0,250) +
@@ -547,6 +598,8 @@ misses_plotted <- statcast.2016.predicted %>%
   theme_battedball_grey() + 
   theme(strip.text.x = element_text(face = "bold", size = 14)) +
   scale_color_manual(values = tab_condensed_factor, "Outcome")
+
+misses_plotted
 
 ggsave("misses_plotted.png", misses_plotted, scale = .8, width = 14, height = 8.5, units = "in")
 
