@@ -38,6 +38,9 @@ source("https://raw.githubusercontent.com/BillPetti/R-Plotting-Resources/master/
 # load custom ggplot2 theme
 source("https://raw.githubusercontent.com/BillPetti/R-Plotting-Resources/master/theme_bp_grey")
 
+# load custom theme for plotting batted ball data
+source("https://raw.githubusercontent.com/BillPetti/R-Plotting-Resources/master/theme_battedball_grey.R")
+
 # load custom confusion matrix and classification model evaluation function
 source("/Users/williampetti/General-Code-Reference/confusionMatrix.R")
 
@@ -91,7 +94,7 @@ scrape_statcast <- function(batter, year) {
 
 statcast <- mlbamid.df.2016 %>% group_by(batter, year) %>% do(scrape_statcast(.$batter,.$year))
 
-statcast.2016 <- statacst
+statcast.2016 <- statcast
 
 # code if the batted ball resulted in a hit or an out
 
@@ -109,50 +112,33 @@ statcast.2016$fieldingTeam <- with(statcast.2016, ifelse(inning_topbot == "bot",
 
 statcast.2016$row <- row.names(statcast.2016) %>% as.numeric()
 
+# recode stand and home_team as factors
+
+statcast.2016$stand <- as.factor(statcast.2016$stand)
+statcast.2016$home_team <- as.factor(statcast.2016$home_team)
+
 # subset 
 
 working_data <- ungroup(statcast.2016) %>%
+  filter(game_date <= "2016-05-28") %>%
   select(hit_distance_sc:hit_angle, hc_x, hc_y, hit, stand, fieldingTeam, home_team, row) %>%
   filter(!is.na(hit_distance_sc)) %>%
   filter(!is.na(hit_angle)) %>% 
   filter(!is.na(hit_speed)) %>%
   arrange(desc(hit))
 
-working_data$rows <- row.names(working_data)
 table(working_data$hit)
 
-working_data$stand <- as.factor(working_data$stand)
-working_data$home_team <- as.factor(working_data$home_team)
+# remove apparently miscoded balls with x,y of 1,1
 
-working_data_original <- working_data
-
-# normalize exit velocity, launch angle and distance
-# scaled features
-
-scaled_data <- scale(working_data[,c(1:5)])
-scale_values <- attr(scaled_data, 'scaled:scale')
-# hit_distance_sc       hit_speed       hit_angle            hc_x            hc_y 
-#       104.40557        13.65910        24.23876        40.49578        39.97242 
-
-center_values <- attr(scaled_data, 'scaled:center')
-# hit_distance_sc       hit_speed       hit_angle            hc_x            hc_y 
-#       214.65345        89.29212        11.20313       127.86669       119.34791
-
-working_data_scaled <- cbind(
-  select(working_data, hit:row), 
-  scaled_data
-)
-
-# back_transform = t(apply(scaled_data, 1, function(r) r*attr(scaled_data,'scaled:scale') + attr(scaled_data, 'scaled:center')))
-
-# to transform new values to values for use in the model use (value - center)/scale
+working_data <- filter(working_data, hc_x != 1, hc_y != 1)
 
 # create training and test sets
 # scaled data
 
 set.seed(42)
-train <- sample_frac(working_data_scaled, .50, replace = FALSE)
-test <- setdiff(working_data_scaled, train)
+train <- sample_frac(working_data, .50, replace = FALSE)
+test <- setdiff(working_data, train)
 nrow(train) + nrow(test) == nrow(working_data_scaled)
 
 with(train, table(hit)) %>% prop.table()
@@ -165,9 +151,45 @@ orig_train <- sample_frac(working_data, .75, replace = FALSE)
 orig_test <- setdiff(working_data, orig_train)
 nrow(orig_train) + nrow(orig_test) == nrow(working_data)
 
-orig_train <- select(orig_train, -rows)
 with(orig_train, table(hit)) %>% prop.table()
 with(orig_test, table(hit)) %>% prop.table()
+
+# normalize exit velocity, launch angle and distance
+# scaled features
+
+scaled_data <- scale(train[,c(1:5)])
+scale_values <- attr(scaled_data, 'scaled:scale')
+scale_values
+# hit_distance_sc       hit_speed       hit_angle            hc_x            hc_y 
+# 104.79020        13.70154        24.26699        40.30056        39.90734  
+
+center_values <- attr(scaled_data, 'scaled:center')
+center_values
+# hit_distance_sc       hit_speed       hit_angle            hc_x            hc_y 
+# 215.17478        89.31207        11.31288       128.08273       119.22527 
+
+train <- cbind(scaled_data, select(train, hit:row))
+
+# apply scaling to test data
+
+test$hit_distance_sc <- (test$hit_distance_sc - center_values[1]) / scale_values[1]
+
+test$hit_speed <- (test$hit_speed - center_values[2]) / scale_values[2]
+
+test$hit_angle <- (test$hit_angle - center_values[3]) / scale_values[3]
+
+test$hc_x <- (test$hc_x - center_values[4]) / scale_values[4]
+
+test$hc_y <- (test$hc_y - center_values[5]) / scale_values[5]
+
+# working_data_scaled <- cbind(
+#   select(working_data, hit:row), 
+#   scaled_data
+# )
+
+# back_transform = t(apply(scaled_data, 1, function(r) r*attr(scaled_data,'scaled:scale') + attr(scaled_data, 'scaled:center')))
+
+# to transform new values to values for use in the model use (value - center)/scale
 
 # build training models(s)
 
@@ -200,14 +222,14 @@ rf.1_confusion <- confusionMatrix(model = rf.1, x = test, y = test$hit)
 
 #       fits
 # actuals     0     1
-#       0 10160   751
-#       1   786  5214
+#       0 10153   753
+#       1   803  5186
 #                     V1
-# sensitivity      0.869
-# precision        0.874
+# sensitivity      0.866
+# precision        0.873
 # specificity      0.931
-# overall_accuracy 0.909
-# f1_measure       0.872
+# overall_accuracy 0.908
+# f1_measure       0.870
 
 # predict_fit.rf.1 <- data.frame(fits = predict(rf.1, test), actuals = test$hit)
 # confuse <- with(predict_fit, table(actuals, fits))
@@ -217,7 +239,6 @@ rf.1_confusion <- confusionMatrix(model = rf.1, x = test, y = test$hit)
 
 set.seed(42)
 rf.2 <- randomForest(as.factor(hit) ~ ., data = select(train, -row, -home_team, -stand, -fieldingTeam), ntree = 501, importance = TRUE)
-# rf.2 <- randomForest(as.factor(hit) ~ ., ntree = 501, data = select(train, -home_team, -fieldingTeam, -stand), importance = TRUE)
 
 print(rf.2) # accuracy does not improve past the selected ntree
 
@@ -231,7 +252,7 @@ pred.rf.2 <- prediction(predict_fit.rf.2$fits, predict_fit.rf.2$actuals)
 
 roc.pred.rf.2 <- performance(pred.rf.2, measure = "tpr", x.measure = "fpr")
 
-plot(roc.pred.rf.2)
+plot(roc.pred.rf.2, colorize = T)
 
 abline(a = 0, b = 1)
 
@@ -247,32 +268,40 @@ rf.2_confusion_test <- confusionMatrix(model = rf.2, x = test, y = test$hit)
 
 #           fits
 # actuals     0     1
-#       0 10206   505
-#       1   897  4955
+#       0 10399   507
+#       1   889  5100
 #                     V1
-# sensitivity      0.847
-# precision        0.908
-# specificity      0.953
-# overall_accuracy 0.915
-# f1_measure       0.876
+# sensitivity      0.852
+# precision        0.910
+# specificity      0.954
+# overall_accuracy 0.917
+# f1_measure       0.880
 
 confusionMatrix(df = predict_fit.rf.2)
 
-rf.2.cv <- rfcv(train[,c(5:9)], as.factor(train[,1]), cv.fold = 5)
+# rf.2.cv <- rfcv(train[,c(1:5)], as.factor(train[,6]), cv.fold = 5)
 
 # can we improve the model by altering the number of variables randomly tried at each branch?
 
-tune.rf.2 <- tuneRF(train[,c(5:9)], as.factor(train[,1]), stepFactor = .5, plot = TRUE)
+tune.rf.2 <- tuneRF(train[,c(1:5)], as.factor(train[,6]), stepFactor = .5, plot = TRUE)
+
+# only marginal improvement is observed
+# mtry = 2  OOB error = 8.83% 
+# Searching left ...
+# mtry = 4 	OOB error = 8.6% 
+# 0.02613941 0.05 
+# Searching right ...
+# mtry = 1 	OOB error = 8.65% 
+# 0.02077748 0.05 
 
 # with just speed, angle, and distance
 
 set.seed(42)
 rf.3 <- randomForest(as.factor(hit) ~ ., data = select(train, -row, -hc_x, -hc_y, -home_team, -stand, -fieldingTeam), ntree = 501, importance = TRUE)
-# rf.2 <- randomForest(as.factor(hit) ~ ., ntree = 501, data = select(train, -home_team, -fieldingTeam, -stand), importance = TRUE)
 
-print(rf.3) # accuracy does not improve past the selected ntree
+print(rf.3) 
 
-plot(rf.3)
+plot(rf.3) # accuracy does not improve past the selected ntree
 
 varImpPlot(rf.3)
 
@@ -298,32 +327,32 @@ rf.3_confusion <- confusionMatrix(model = rf.3, x = test, y = test$hit)
 
 #         fits
 # actuals    0    1
-#       0 5034  426
-#       1  799 2197
+#       0 10067  839
+#       1  1546 4443
 #                     V1
-# sensitivity      0.733
-# precision        0.838
-# specificity      0.922
-# overall_accuracy 0.855
-# f1_measure       0.782
+# sensitivity      0.742
+# precision        0.841
+# specificity      0.923
+# overall_accuracy 0.859
+# f1_measure       0.788
 
 # the optimal model appears to be rf.2, which excludes information about the fielding team, the park, and the handedness of the batter. Excluding distance from the model (rf.3), even though we have the location information, appears to significantly reduce the accuracy of the model.
 
 # examine whether the model is missing systematically for certain records
 
-# test_set_rows <- test$row
-# 
-# rf.2_full_test_data <- cbind(filter(working_data, row %in% test_set_rows), predict_fit.rf.2$fits)
-# 
-# names(rf.2_full_test_data)[12] <- "fits"
-# 
-# rf.2_mean_table <- select(rf.2_full_test_data, -rows) %>% 
-#   group_by(hit, fits) %>%
-#   summarise_each(funs(mean(., na.rm = TRUE),n()))
-# 
-# rf.2_full_test_data$type <- with(rf.2_full_test_data, ifelse(hit == fits, 1, 0))
-# 
-# rf.2_full_test_data$hit_label <- with(rf.2_full_test_data, ifelse(hit == 1, "Hit", "Out"))
+test_set_rows <- test$row
+
+rf.2_full_test_data <- cbind(filter(working_data, row %in% test_set_rows), predict_fit.rf.2$fits)
+
+names(rf.2_full_test_data)[11] <- "fits"
+
+rf.2_mean_table <- select(rf.2_full_test_data, -row) %>% 
+  group_by(hit, fits) %>%
+  summarise_each(funs(mean(., na.rm = TRUE),n()))
+
+rf.2_full_test_data$type <- with(rf.2_full_test_data, ifelse(hit == fits, 1, 0))
+
+rf.2_full_test_data$hit_label <- with(rf.2_full_test_data, ifelse(hit == 1, "Hit", "Out"))
 
 # plot the performance of the model based on the three features included
 
@@ -340,6 +369,8 @@ rf.2_plot1 <- ggplot(rf.2_full_test_data, aes(hit_angle, hit_distance_sc)) +
   theme(strip.text.x = element_text(face = "bold", size = 14)) +
   scale_color_manual(values = tab_condensed, guide = FALSE)
 
+rf.2_plot1
+
 rf.2_plot2 <- ggplot(rf.2_full_test_data, aes(hit_speed, hit_distance_sc)) +
   geom_point(aes(color = as.factor(type)), alpha = .2) + 
   xlab("\nSpeed off the Bat") +
@@ -348,6 +379,8 @@ rf.2_plot2 <- ggplot(rf.2_full_test_data, aes(hit_speed, hit_distance_sc)) +
   theme_bp_grey() + 
   theme(strip.text.x = element_text(face = "bold", size = 14)) +
   scale_color_manual(values = tab_condensed, guide = FALSE)
+
+rf.2_plot2
 
 rf.2_plot3 <- ggplot(rf.2_full_test_data, aes(hit_angle, hit_speed)) +
   geom_point(aes(color = as.factor(type)), alpha = .2) + 
@@ -358,6 +391,8 @@ rf.2_plot3 <- ggplot(rf.2_full_test_data, aes(hit_angle, hit_speed)) +
   theme(strip.text.x = element_text(face = "bold", size = 14)) +
   scale_color_manual(values = tab_condensed, guide = FALSE)
 
+rf.2_plot3
+
 grid_plot_rf.2 <- grid.arrange(rf.2_plot1, rf.2_plot2, rf.2_plot3, ncol = 3)
 grid_plot_rf.2
 
@@ -366,7 +401,12 @@ ggsave("grid_plot_rf.2.png", grid_plot_rf.2, scale = 1.2, width = 11, height = 8
 # only hit_distance_sc
 
 set.seed(42)
-rf.4 <- randomForest(as.factor(hit) ~ ., data = select(train, -row, -home_team, -fieldingTeam, -stand, -hit_speed, -hit_angle), importance = TRUE)
+rf.4 <- randomForest(as.factor(hit) ~ ., data = select(train, -row, -home_team, -fieldingTeam, -stand, -hit_speed, -hit_angle, -hc_x, -hc_y), importance = TRUE)
+
+print(rf.4)
+
+plot(rf.4)
+
 varImpPlot(rf.4)
 
 predict_fit.rf.4 <- data.frame(fits = predict(rf.4, test, type = "prob")[,2], actuals = test$hit)
@@ -384,76 +424,111 @@ rf.4_confusion <- confusionMatrix(model = rf.4, x = test, y = test$hit)
 
 #         fits
 # actuals    0    1
-#       0 3921 1344
-#       1 1516 1675
+#       0 8347 2559
+#       1 2810 3179
 #                     V1
-# sensitivity      0.525
-# precision        0.555
-# specificity      0.745
-# overall_accuracy 0.662
-# f1_measure       0.539
+# sensitivity      0.531
+# precision        0.554
+# specificity      0.765
+# overall_accuracy 0.682
+# f1_measure       0.542
 
+# only hit_distance_sc
+
+set.seed(42)
+rf.5 <- randomForest(as.factor(hit) ~ ., data = select(train, -row, -home_team, -stand), importance = TRUE)
+
+print(rf.5)
+
+plot(rf.5)
+
+varImpPlot(rf.5)
+
+predict_fit.rf.5 <- data.frame(fits = predict(rf.5, test, type = "prob")[,2], actuals = test$hit)
+
+pred.rf.5 <- prediction(predict_fit.rf.5$fits, predict_fit.rf.5$actuals)
+roc.pred.rf.5 <- performance(pred.rf.5, measure = "tpr", x.measure = "fpr")
+plot(roc.pred.rf.5)
+abline(a = 0, b = 1)
+opt <- opt.cut(roc.pred.rf.5, pred.rf.5)
+opt
+opt <- opt[3]
+predict_fit.rf.5$fits <- with(predict_fit.rf.5, ifelse(fits > opt, 1, 0)) 
+
+rf.5_confusion <- confusionMatrix(model = rf.5, x = test, y = test$hit)
+
+#           fits
+# actuals     0     1
+#       0 10245   661
+#       1   815  5174
+#                     V1
+# sensitivity      0.864
+# precision        0.887
+# specificity      0.939
+# overall_accuracy 0.913
+# f1_measure       0.875
 
 ## GAM models for hit/no hit
 
-gam.1 <- gam(hit ~ ns(hit_distance_sc,4) + ns(hit_speed,4) + ns(hit_angle,4), data = orig_train, family = "binomial")
-summary(gam.1)
-
-predict_fit.gam.1 <- data.frame(fits = predict(gam.1, orig_test, type = "response"), actuals = orig_test$hit)
-pred.gam.1 <- prediction(predict_fit.gam.1$fits, predict_fit.gam.1$actuals)
-roc.pred.gam.1 <- performance(pred.gam.1, measure = "tpr", x.measure = "fpr")
-plot(roc.pred.gam.1)
-abline(a = 0, b = 1)
-opt <- opt.cut(roc.pred.gam.1, pred.gam.1)
-opt
-opt <- opt[3]
-predict_fit.gam.1$fits <- with(predict_fit.gam.1, ifelse(fits > opt, 1, 0)) 
-
-confusionMatrix(df = predict_fit.gam.1)
-
-#         fits
-# actuals    0    1
-#       0 4560  705
-#       1  758 2433
-#                     V1
-# sensitivity      0.762
-# precision        0.775
-# specificity      0.866
-# overall_accuracy 0.827
-# f_measure        0.769
-
-gam.2 <- gam(hit ~ s(hit_distance_sc, df = 5) + s(hit_speed, df = 4) + s(hit_angle, df = 4), data = orig_train, family = "binomial")
-summary(gam.2)
-plot(gam.2, se = TRUE)
-
-predict_fit.gam.2 <- data.frame(fits = predict(gam.2, orig_test, type = "response"), actuals = orig_test$hit)
-pred.gam.2 <- prediction(predict_fit.gam.2$fits, predict_fit.gam.2$actuals)
-roc.pred.gam.2 <- performance(pred.gam.2, measure = "tpr", x.measure = "fpr")
-plot(roc.pred.gam.2)
-abline(a = 0, b = 1)
-opt <- opt.cut(roc.pred.gam.2, pred.gam.2)
-opt
-opt <- opt[3]
-predict_fit.gam.2$fits <- with(predict_fit.gam.2, ifelse(fits > opt, 1, 0)) 
-
-confusionMatrix(df = predict_fit.gam.2)
-
-#         fits
-# actuals    0    1
-#       0 4500  765
-#       1  761 2430
-#                     V1
-# sensitivity      0.762
-# precision        0.761
-# specificity      0.855
-# overall_accuracy 0.820
-# f_measure        0.761
+# gam.1 <- gam(hit ~ ns(hit_distance_sc,4) + ns(hit_speed,4) + ns(hit_angle,4), data = orig_train, family = "binomial")
+# summary(gam.1)
+# 
+# predict_fit.gam.1 <- data.frame(fits = predict(gam.1, orig_test, type = "response"), actuals = orig_test$hit)
+# pred.gam.1 <- prediction(predict_fit.gam.1$fits, predict_fit.gam.1$actuals)
+# roc.pred.gam.1 <- performance(pred.gam.1, measure = "tpr", x.measure = "fpr")
+# plot(roc.pred.gam.1)
+# abline(a = 0, b = 1)
+# opt <- opt.cut(roc.pred.gam.1, pred.gam.1)
+# opt
+# opt <- opt[3]
+# predict_fit.gam.1$fits <- with(predict_fit.gam.1, ifelse(fits > opt, 1, 0)) 
+# 
+# confusionMatrix(df = predict_fit.gam.1)
+# 
+# #         fits
+# # actuals    0    1
+# #       0 4560  705
+# #       1  758 2433
+# #                     V1
+# # sensitivity      0.762
+# # precision        0.775
+# # specificity      0.866
+# # overall_accuracy 0.827
+# # f_measure        0.769
+# 
+# gam.2 <- gam(hit ~ s(hit_distance_sc, df = 5) + s(hit_speed, df = 4) + s(hit_angle, df = 4), data = orig_train, family = "binomial")
+# summary(gam.2)
+# plot(gam.2, se = TRUE)
+# 
+# predict_fit.gam.2 <- data.frame(fits = predict(gam.2, orig_test, type = "response"), actuals = orig_test$hit)
+# pred.gam.2 <- prediction(predict_fit.gam.2$fits, predict_fit.gam.2$actuals)
+# roc.pred.gam.2 <- performance(pred.gam.2, measure = "tpr", x.measure = "fpr")
+# plot(roc.pred.gam.2)
+# abline(a = 0, b = 1)
+# opt <- opt.cut(roc.pred.gam.2, pred.gam.2)
+# opt
+# opt <- opt[3]
+# predict_fit.gam.2$fits <- with(predict_fit.gam.2, ifelse(fits > opt, 1, 0)) 
+# 
+# confusionMatrix(df = predict_fit.gam.2)
+# 
+# #         fits
+# # actuals    0    1
+# #       0 4500  765
+# #       1  761 2430
+# #                     V1
+# # sensitivity      0.762
+# # precision        0.761
+# # specificity      0.855
+# # overall_accuracy 0.820
+# # f_measure        0.761
 
 ## predicted probabilities using rf.2
 
 # create a data set with all combinations of angle, speed, and distance
 
 pred_data_emp <- ungroup(statcast.2016) %>% 
+  filter(hc_x != 1, hc_y != 1) %>% 
   select(hit_distance_sc, hit_angle, hit_speed, hc_x, hc_y) %>%
   round(.) %>%
   unique(.) %>%
@@ -525,7 +600,7 @@ compare_prob <- left_join(pred_prob_by_buckets, empirical_prob_hit, by = c("angl
 compare_lm <- lm(empirical_ave ~ ave_prob, data = compare_prob)
 
 summary(compare_lm)$sigma 
-# RMSE = [1] 0.0100505
+# RMSE = [1] 0.1366606
 
 require(scales)
 
@@ -537,58 +612,87 @@ ggsave("compare_prob_plot.png", compare_prob_plot, scale = 1.2, width = 11, heig
 
 # apply predictive model to all Statcast data in 2016
 
-# statcast.2016.scaled <- rbind(test, train) %>%
-#   arrange(row)
+statcast.2016.scaled_original <- ungroup(statcast.2016) %>% 
+  filter(hc_x != 1, hc_y != 1)
+statcast.2016.scaled <- statcast.2016.scaled_original
 
-# statcast.2016.scaled$hit_distance_sc <- (statcast.2016.scaled$hit_distance_sc - center_values[1]) / scale_values[1]
-# 
-# statcast.2016.scaled$hit_speed <- (statcast.2016.scaled$hit_speed - center_values[2]) / scale_values[2]
-# 
-# statcast.2016.scaled$hit_angle <- (statcast.2016.scaled$hit_angle - center_values[3]) / scale_values[3]
-# 
-# statcast.2016.scaled$hc_x <- (statcast.2016.scaled$hc_x - center_values[4]) / scale_values[4]
-# 
-# statcast.2016.scaled$hc_y <- (statcast.2016.scaled$hc_y - center_values[5]) / scale_values[5]
+statcast.2016.scaled$hit_distance_sc <- (statcast.2016.scaled$hit_distance_sc - center_values[1]) / scale_values[1]
 
-statcast.2016.fit <- predict(rf.2, test, type = "response") %>%
+statcast.2016.scaled$hit_speed <- (statcast.2016.scaled$hit_speed - center_values[2]) / scale_values[2]
+
+statcast.2016.scaled$hit_angle <- (statcast.2016.scaled$hit_angle - center_values[3]) / scale_values[3]
+
+statcast.2016.scaled$hc_x <- (statcast.2016.scaled$hc_x - center_values[4]) / scale_values[4]
+
+statcast.2016.scaled$hc_y <- (statcast.2016.scaled$hc_y - center_values[5]) / scale_values[5]
+
+statcast.2016.fit <- predict(rf.2, statcast.2016.scaled, type = "response") %>%
   as.data.frame()
-statcast.2016.scaled <- cbind(test, statcast.2016.fit)
-names(statcast.2016.scaled)[11] <- "fit" 
-
-statcast.2016.predicted <- left_join(
-  select(statcast.2016.scaled, row, fit),
-  statcast.2016, by = "row") %>%
+statcast.2016.scaled <- cbind(statcast.2016.scaled, statcast.2016.fit)
+names(statcast.2016.scaled)[65] <- "fit" 
+statcast.2016.predicted <- statcast.2016.scaled %>%
   mutate(fit_dummy = fit)
 
+# statcast.2016.predicted <- left_join(
+#   select(statcast.2016.scaled, row, fit),
+#   statcast.2016, by = "row") %>%
+#   mutate(fit_dummy = fit) %>%
+#   filter(fit != NA)
+
 statcast.2016.predicted$fit_dummy <- as.character(statcast.2016.predicted$fit_dummy) %>% as.numeric()           
+statcast.2016.predicted <- filter(statcast.2016.predicted, !is.na(fit_dummy))
 
 with(statcast.2016.predicted, table(hit, fit_dummy))
+with(statcast.2016.predicted, table(fit_dummy))
 
-statcast.2016.predicted$not_converted <- with(statcast.2016.predicted, ifelse(hit == 1 & fit_dummy == 0, 1, 0))
+statcast.2016.predicted$expected_outs <- with(statcast.2016.predicted, ifelse(fit_dummy == 0, 1, 0))
 
-statcast.2016.predicted$converted_stolen_hit <- with(statcast.2016.predicted, ifelse(hit == 0 & fit_dummy == 1, 1, 0))
+statcast.2016.predicted$outs <- with(statcast.2016.predicted, ifelse(hit == 0, 1, 0))
 
-conversion_by_team <- filter(statcast.2016.predicted, events != "Home Run") %>% 
+statcast.2016.predicted$expected_outs_made <- with(statcast.2016.predicted, ifelse(expected_outs == 1 & outs == 1, 1, 0))
+
+statcast.2016.predicted$unexpected_outs_made <- with(statcast.2016.predicted, ifelse(expected_outs == 0 & hit == 0, 1, 0))
+
+conversion_by_team <- statcast.2016.predicted %>% 
   group_by(fieldingTeam) %>% 
-  summarise(unexpected_plays = round(sum(ifelse(fit_dummy == 1 & hit == 0, 1, NA)/sum(fit_dummy), na.rm = TRUE),3), efficiency = round((length(hit)-sum(hit))/(length(hit)-sum(fit_dummy)),3)) %>%
-  arrange(desc(efficiency))
+  summarise(expected_outs_total = sum(expected_outs), expected_outs_converted = sum(expected_outs_made), unexpected_outs_converted = sum(unexpected_outs_made), expected_hits_total = sum(fit_dummy)) %>%
+  mutate(expected_outs_perc = expected_outs_converted/expected_outs_total, unexpected_outs_perc = unexpected_outs_converted/expected_hits_total)
 
-conversion_by_team_plot <- ungroup(conversion_by_team) %>% ggplot(aes(efficiency, unexpected_plays)) + geom_text(aes(label = fieldingTeam), color = "#006BA4", fontface = "bold") + stat_smooth(method = "lm", color = "#C85200") + scale_x_continuous(labels = percent) + scale_y_continuous(labels = percent)+ xlab("\n% of Expected Outs Made") + ylab("% of Unexpected Outs Converted\n") + ggtitle("\nExpected Outs vs. Unexpected Outs: Statcast Data (2016)\n") + theme_bp_grey()
+conversion_by_team_plot <- ungroup(conversion_by_team) %>% ggplot(aes(expected_outs_perc, unexpected_outs_perc)) + geom_text(aes(label = fieldingTeam), color = "#006BA4", fontface = "bold") + stat_smooth(color = "#C85200") + scale_x_continuous(limits = c(.94,.97), labels = percent) + scale_y_continuous(labels = percent)+ xlab("\n% of Expected Outs Made") + ylab("% of Unexpected Outs Converted\n") + ggtitle("\nExpected Outs vs. Unexpected Outs: Statcast Data (2016)\n") + theme_bp_grey()
 
 conversion_by_team_plot
 
-write.csv(conversion_by_team, "conversion_by_team.csv", row.names = FALSE)            
+ggsave("conversion_by_team_plot.png", conversion_by_team_plot, scale = 1.2, width = 11, height = 8.5, units = "in")
+
+write.csv(conversion_by_team, "conversion_by_team.csv", row.names = FALSE)      
+
+expected_ave_by_team <- statcast.2016.predicted %>% 
+  filter(events != "Home Run") %>%
+  group_by(fieldingTeam) %>% 
+  summarise(n(), expected_ba = sum(fit_dummy)/n(), actual_ba = sum(hit)/n())
+
+expected_v_actual_ave_plot <- ungroup(expected_ave_by_team) %>% ggplot(aes(expected_ba, actual_ba)) + geom_text(aes(label = fieldingTeam), color = "#006BA4", fontface = "bold") + geom_abline(intercept = 0, color = "#C85200") + scale_x_continuous(limits = c(.260,.365)) + scale_y_continuous(limits = c(.260,.365)) + xlab("\nExpected Batting Average Against") + ylab("Actual Batting Average Against\n") + ggtitle("\nExpected vs. Actual Batting Average Against: Statcast Data (2016)\n") + theme_bp_grey()
+
+expected_v_actual_ave_plot
+
+ggsave("expected_v_actual_ave_plot.png", expected_v_actual_ave_plot, scale = 1.1, width = 14, height = 8.5, units = "in")
+
+write.csv(expected_ave_by_team, "expected_ave_by_team.csv", row.names = FALSE)  
+
 # plot batted ball location
 
-statcast.2016.predicted$miss <- with(statcast.2016.predicted, ifelse(hit != fit_dummy, "Incorrect", "Correct"))
+statcast.2016.predicted.original <- select(statcast.2016.predicted, -hc_y, -hc_x, -hit_distance_sc, -hit_angle, -hit_speed) %>%
+  left_join((select(statcast.2016.scaled_original, hit_distance_sc, hit_angle, hit_speed, hc_x, hc_y, row)), by = "row")
+                                              
+statcast.2016.predicted.original$miss <- with(statcast.2016.predicted.original, ifelse(hit != fit_dummy, "Incorrect", "Correct"))
 
-statcast.2016.predicted$hit_label <- with(statcast.2016.predicted, ifelse(hit == 1, "Hit", "Out")) %>% as.factor()
+statcast.2016.predicted.original$hit_label <- with(statcast.2016.predicted.original, ifelse(hit == 1, "Hit", "Out")) %>% as.factor()
 
 tab_condensed_factor <- c("#C85200","#006BA4")
 
-misses_plotted <- filter(statcast.2016.predicted, !is.na(miss)) %>% 
+misses_plotted <- filter(statcast.2016.predicted.original, !is.na(miss)) %>% 
   ggplot(aes(x = hc_x, y = (hc_y*-1))) + 
-  geom_point(aes(color = as.factor(hit_label)), alpha = .5) + 
+  geom_point(aes(color = hit_label), alpha = .5) + 
   xlim(0,250) +
   ylim(-250, 0) +
   ggtitle("\nComparing Correct & Incorrect Model Predictons\n") +
@@ -603,7 +707,32 @@ misses_plotted
 
 ggsave("misses_plotted.png", misses_plotted, scale = .8, width = 14, height = 8.5, units = "in")
 
-averages_misses_correct_pred <- select(statcast.2016.predicted, miss, hit_distance_sc:hit_angle) %>%
-  group_by(miss) %>%
-  summarise_each(funs(mean(., na.rm = TRUE)))
-  
+# code and calculate accuracy by distance bucet
+
+statcast.2016.predicted.original$distance_bucket <- cut(statcast.2016.predicted.original$hit_distance_sc, breaks = c(0,45,90,125,175,200,250,300,350,400,450,500), include.lowest = TRUE)
+
+statcast.2016.predicted.original$miss_num <- with(statcast.2016.predicted.original, ifelse(miss == "Correct", 1, 0)) %>%
+  as.numeric()
+
+averages_misses_correct_pred <- statcast.2016.predicted.original %>%
+  group_by(distance_bucket) %>% 
+  summarise(n(), correct_perc = round(mean(miss_num, na.rm = TRUE),3))
+
+accuracy_by_distance_plot <- ungroup(averages_misses_correct_pred) %>% 
+  filter(!is.na(distance_bucket)) %>%
+  ggplot(aes(x = distance_bucket, y = correct_perc)) + 
+  scale_y_continuous(limits = c(.50, 1), labels = percent) +
+  geom_point(alpha = .8, size = 7, fill = "#C85200", color = "#006BA4", shape = 21, stroke = 1.5) +
+  geom_text(aes(label = percent(correct_perc)), size = 5, vjust = 2.5, fontface = "bold") + 
+  xlab("\nDistance Range (in feet)") + 
+  ylab("% Correctly Predicted (note axis is truncated)\n") + 
+  ggtitle("\nAccuracy Rate by Distance Range\n") + 
+  theme_bp_grey()
+
+accuracy_by_distance_plot
+
+ggsave("accuracy_by_distance_plot.png", accuracy_by_distance_plot, scale = 1.1, width = 11, height = 8.5, units = "in")
+
+# export original data 
+
+write.csv(statcast, "statcast.csv", row.names = FALSE)
