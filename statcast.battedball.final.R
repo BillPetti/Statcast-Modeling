@@ -320,7 +320,7 @@ rf.4_confusion_validate <- confusionMatrix(model = rf.4, x = validate, y = valid
 # only speed, angle, stand, fielding team and park
 
 set.seed(42)
-rf.5 <- randomForest(as.factor(hit) ~ ., mtry = 4, ntrees = 501, data = select(train, -row, -hit_distance_sc, -hc_y, -hc_x), importance = TRUE)
+rf.5 <- randomForest(as.factor(hit) ~ ., mtry = 2, ntrees = 501, data = select(train, -row, -hit_distance_sc, -hc_y, -hc_x), importance = TRUE)
 
 print(rf.5)
 
@@ -586,7 +586,7 @@ original_ave_by_team <- statcast.2016.predicted %>%
   filter(events != "Home Run") %>%
   summarise(n(), actual_ba = sum(hit)/n())
 
-expected_v_actual_ave_plot <- ungroup(expected_ave_by_team) %>% ggplot(aes(expected_ba, actual_ba)) + geom_text(aes(label = fieldingTeam), color = "#006BA4", fontface = "bold") + geom_abline(intercept = 0, color = "#C85200") + scale_x_continuous(limits = c(.260,.425)) + scale_y_continuous(limits = c(.280,.425)) + xlab("\nExpected Batting Average Against") + ylab("Actual Batting Average Against\n") + ggtitle("\nExpected vs. Actual Batting Average Against: Statcast Data (2016)\n") + theme_bp_grey()
+expected_v_actual_ave_plot <- ungroup(expected_ave_by_team) %>% ggplot(aes(expected_ba, actual_ba)) + geom_text(aes(label = fieldingTeam), color = "#006BA4", fontface = "bold") + geom_abline(intercept = 0, color = "#C85200") + scale_x_continuous(limits = c(.250,.450)) + scale_y_continuous(limits = c(.250,.450)) + xlab("\nExpected Batting Average Against") + ylab("Actual Batting Average Against\n") + ggtitle("\nExpected vs. Actual Batting Average Against: Statcast Data (2016)\n") + theme_bp_grey()
 
 expected_v_actual_ave_plot
 
