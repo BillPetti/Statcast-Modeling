@@ -2,7 +2,6 @@
 ## Bill Petti
 ## https://github.com/BillPetti
 ## Created May 27, 2016
-## Data pulled after games on May 28, 2016
 
 # Load packages and functions
 
@@ -614,6 +613,8 @@ misses_plotted <- filter(statcast.2016.predicted.original, !is.na(miss)) %>%
   facet_wrap(~miss) +
   geom_segment(x=128, xend = 19, y=-200, yend = -100) + 
   geom_segment(x=128, xend = 236, y=-200, yend = -100) + 
+  geom_curve(x = 128-45, xend = 128 + 45, y = -208 + 48, yend = -208 + 48, curvature = -.7, linetype = "dotted") + 
+  geom_curve(x = 19, xend = 237, y = -100, yend = -100, curvature = -.65) + 
   theme_battedball_grey() + 
   theme(strip.text.x = element_text(face = "bold", size = 14)) +
   scale_color_manual(values = tab_condensed_factor, "Outcome")
@@ -651,26 +652,3 @@ ggsave("accuracy_by_distance_plot.png", accuracy_by_distance_plot, scale = 1.1, 
 # export original data 
 
 write.csv(statcast, "statcast.csv", row.names = FALSE)
-
-########
-
-saveRDS(rf.5, "prob_hit.rds")
-
-scale_prob_hit <- function(x) {
-  x$hit_speed <- (x$hit_speed - center_values[2]) / scale_values[2]
-  x$hit_angle <- (x$hit_angle - center_values[3]) / scale_values[3]
-  x
-}
-
-stanton <- scale_prob_hit(savant_data.4)
-stanton$fieldingTeam <- with(stanton, ifelse(inning_topbot == "bot", away_team, home_team)) %>% 
-  as.factor()
-stanton$stand <- as.factor(stanton$stand)
-stanton$home_team <- as.factor(stanton$home_team)
-levels(stanton$home_team) <- levels_home_team
-levels(stanton$stand) <- levels_stand
-levels(stanton$fieldingTeam) <- levels_fieldingTeam
-
-stanton_prob <- predict(rf.5, stanton, type = "prob")[,2]
-stanton_prob <- cbind(savant_data.4, stanton_prob)
-stanton_prob$stanton_prob <- round(stanton_prob$stanton_prob, 3) %>% percent()
