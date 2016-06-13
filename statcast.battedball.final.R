@@ -611,8 +611,8 @@ misses_plotted <- filter(statcast.2016.predicted.original, !is.na(miss)) %>%
   ylim(-250, 0) +
   ggtitle("\nComparing Correct & Incorrect Model Predictons\n") +
   facet_wrap(~miss) +
-  geom_segment(x=128, xend = 19, y=-200, yend = -100) + 
-  geom_segment(x=128, xend = 236, y=-200, yend = -100) + 
+  geom_segment(x=128, xend = 18, y=-208, yend = -100) + 
+  geom_segment(x=128, xend = 237, y=-208, yend = -100) + 
   geom_curve(x = 128-45, xend = 128 + 45, y = -208 + 48, yend = -208 + 48, curvature = -.7, linetype = "dotted") + 
   geom_curve(x = 19, xend = 237, y = -100, yend = -100, curvature = -.65) + 
   theme_battedball_grey() + 
