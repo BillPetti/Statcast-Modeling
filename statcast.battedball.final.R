@@ -506,6 +506,34 @@ empirical_prob_hit <- empirical_prob_hit %>%
 
 compare_prob <- left_join(pred_prob_by_buckets, empirical_prob_hit, by = c("angle_buckets", "speed_buckets"))
 
+compare_prob <- arrange(compare_prob, angle_buckets, speed_buckets)
+
+# format compare_prob
+
+compare_prob$angle_buckets <- gsub("\\[", "(", compare_prob$angle_buckets)
+compare_prob$angle_buckets <- gsub("\\]", ")", compare_prob$angle_buckets)
+
+compare_prob$speed_buckets <- gsub("\\[", "(", compare_prob$speed_buckets)
+compare_prob$speed_buckets <- gsub("\\]", ")", compare_prob$speed_buckets)
+
+# format for export
+
+prob_of_hit <- select(compare_prob, angle_buckets, speed_buckets, ave_prob)
+
+prob_of_hit$angle_buckets <- gsub(",", " to ", prob_of_hit$angle_buckets)
+prob_of_hit$angle_buckets <- gsub("\\(", "", prob_of_hit$angle_buckets)
+prob_of_hit$angle_buckets <- gsub("\\)", "", prob_of_hit$angle_buckets)
+
+prob_of_hit$speed_buckets <- gsub(",", " to ", prob_of_hit$speed_buckets)
+prob_of_hit$speed_buckets <- gsub("\\(", "", prob_of_hit$speed_buckets)
+prob_of_hit$speed_buckets <- gsub("\\)", "", prob_of_hit$speed_buckets)
+
+names(prob_of_hit) <- c("Launch Angle Range (degrees)", "Exit Velocity Range (mph)", "Predicted Probability of a Hit")
+
+prob_of_hit$`Predicted Probability of a Hit` <- percent(prob_of_hit$`Predicted Probability of a Hit`)
+
+write.csv(prob_of_hit, "probability_of_hit.csv", row.names = FALSE)
+
 # regress the empirical probabilties by the predicted probabilities
 
 compare_lm <- lm(empirical_ave ~ ave_prob, data = compare_prob)
