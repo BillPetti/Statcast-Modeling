@@ -6,7 +6,7 @@
 # Load packages and functions
 
 require(pacman)
-p_load(RMySQL, dplyr, reshape2, ggplot2, grid, gridExtra, ROCR, randomForest, gam)
+p_load(RMySQL, dplyr, reshape2, ggplot2, grid, gridExtra, ROCR, randomForest, gam, scales)
 
 sessionInfo()
 # R version 3.2.3 (2015-12-10)
@@ -680,3 +680,48 @@ ggsave("accuracy_by_distance_plot.png", accuracy_by_distance_plot, scale = 1.1, 
 # export original data 
 
 write.csv(statcast, "statcast.csv", row.names = FALSE)
+
+# export scaling function
+
+scale_prob_hit <- function(x) {
+  x$hit_speed <- (x$hit_speed - center_values[2]) / scale_values[2]
+  x$hit_angle <- (x$hit_angle - center_values[3]) / scale_values[3]
+  levels(x$fieldingTeam) <- levels_fieldingTeam
+  levels(x$home_team) <- levels_home_team
+  levels(x$stand) <- levels_stand
+  x
+}
+
+saveRDS(scale_prob_hit, "scale_prob_hit.RDS")
+
+# export levels
+
+saveRDS(center_values, "center_values.RDS")
+saveRDS(scale_values, "scale_values.RDS")
+saveRDS(levels_fieldingTeam, "levels_fieldingTeam.RDS")
+saveRDS(levels_home_team, "levels_home_team.RDS")
+saveRDS(levels_stand, "levels_stand.RDS")
+
+# export final final 
+
+saveRDS(rf.5, "prob_hit.RDS")
+
+# more detailed probability table
+
+# more detail
+
+all_prob_detail <- select(all_prob, hit_angle, hit_speed, all_prob)
+
+all_prob_detail <- all_prob_detail %>%
+  mutate(hit_angle = round(hit_angle), hit_speed = round(hit_speed)) %>%
+  group_by(hit_angle, hit_speed) %>% 
+  summarize(count = n(), predicted_probability = mean(all_prob)) %>%
+  arrange(desc(hit_angle))
+
+all_prob_detail$predicted_probability <- percent(all_prob_detail$predicted_probability)
+
+all_prob_detail2 <- select(all_prob_detail, -count)
+
+names(all_prob_detail2) <- c("Launch Angle Range (degrees)", "Exit Velocity Range (mph)", "Predicted Probability of a Hit")
+
+write.csv(all_prob_detail2, "detailed_probability_hit.csv", row.names = FALSE)
