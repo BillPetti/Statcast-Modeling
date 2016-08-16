@@ -7,7 +7,7 @@
 # Load packages and functions
 
 require(pacman)
-p_load(RMySQL, dplyr, reshape2, ggplot2, grid, gridExtra, ROCR, randomForest, gam)
+p_load(RMySQL, dplyr, magrittr, reshape2, ggplot2, grid, gridExtra, ROCR, randomForest, mgcv, e1071, caret, gam)
 
 sessionInfo()
  
@@ -61,7 +61,7 @@ scrape_statcast <- function(batter, year) {
 
 statcast <- mlbamid.df.2016 %>% group_by(batter, year) %>% do(scrape_statcast(.$batter,.$year))
 
-statcast.2016 <- statcast
+statcast.2016 <- ungroup(statcast)
 
 # code the type of batted ball outcome
 
@@ -71,12 +71,12 @@ statcast.2016$hit_type <- with(statcast.2016, ifelse(grepl("Single", statcast.20
                                                               ifelse(grepl("Home Run", statcast.2016$events), 4, 0))))) %>%
   as.factor()
 
-# code the run values for each outcome
+# code the run values for each outcome (based on 2016 run values)
 
-statcast.2016$run_value <- with(statcast.2016, ifelse(hit_type == 1, .7,
-                                                     ifelse(hit_type == 2, 1.1,
-                                                            ifelse(hit_type == 3, 1.5,  
-                                                                   ifelse(hit_type == 4, 1.7, 0))))) %>%
+statcast.2016$run_value <- with(statcast.2016, ifelse(hit_type == 1, .462,
+                                                     ifelse(hit_type == 2, .762,
+                                                            ifelse(hit_type == 3, 1.03,  
+                                                                   ifelse(hit_type == 4, 1.4, 0))))) %>%
   as.numeric()
 
 # calculate the horizontal angle of the batted ball using a custom function
@@ -90,29 +90,30 @@ statcast.2016$hor_angle <- horiz_angle(statcast.2016)
 
 # create a variable for the fielding team
 
-statcast.2016$fieldingTeam <- with(statcast.2016, ifelse(inning_topbot == "bot", away_team, home_team)) %>% 
-  as.factor()
+statcast.2016$fieldingTeam <- with(statcast.2016, ifelse(inning_topbot == "bot", away_team, home_team)) %>% as.factor()
+  
+statcast.2016$away_team <- as.factor(statcast.2016$away_team)
+statcast.2016$home_team <- as.factor(statcast.2016$home_team)
 
 # include row names for unique record identification
 
 statcast.2016$row <- row.names(statcast.2016) %>% as.numeric()
 
-# recode stand and home_team as factors
+# recode stand as factor
 
 statcast.2016$stand <- as.factor(statcast.2016$stand)
-statcast.2016$home_team <- as.factor(statcast.2016$home_team)
 
 # subset 
 
 working_data <- ungroup(statcast.2016) %>%
   filter(game_date <= "2016-05-28") %>%
-  select(hit_distance_sc:hit_angle, hc_x, hc_y, hit, stand, fieldingTeam, home_team, row) %>%
+  select(hit_distance_sc:hit_angle, hc_x, hc_y, hor_angle, hit_type, run_value, stand, fieldingTeam, home_team, row) %>%
   filter(!is.na(hit_distance_sc)) %>%
   filter(!is.na(hit_angle)) %>% 
   filter(!is.na(hit_speed)) %>%
-  arrange(desc(hit))
+  arrange(desc(hit_type))
 
-table(working_data$hit)
+table(working_data$hit_type)
 
 # remove apparently miscoded balls with x,y of 1,1
 
@@ -129,21 +130,21 @@ validate <- setdiff(split, test)
 
 nrow(train) + nrow(test) + nrow(validate) == nrow(working_data)
 
-with(train, table(hit)) %>% prop.table()
-with(test, table(hit)) %>% prop.table()
-with(validate, table(hit)) %>% prop.table()
+with(train, table(hit_type)) %>% prop.table()
+with(test, table(hit_type)) %>% prop.table()
+with(validate, table(hit_type)) %>% prop.table()
 
 # normalize exit velocity, launch angle and distance
 # scaled features
 
-scaled_data <- scale(train[,c(1:5)])
+scaled_data <- scale(train[,c(1:6)])
 scale_values <- attr(scaled_data, 'scaled:scale')
 scale_values
 
 center_values <- attr(scaled_data, 'scaled:center')
 center_values
 
-train <- cbind(scaled_data, select(train, hit:row))
+train <- cbind(scaled_data, select(train, hit_type:row))
 
 # save levels for factor variables
 
@@ -163,6 +164,8 @@ test$hc_x <- (test$hc_x - center_values[4]) / scale_values[4]
 
 test$hc_y <- (test$hc_y - center_values[5]) / scale_values[5]
 
+test$hor_angle <- (test$hc_y - center_values[6]) / scale_values[6]
+
 # apply scaling to validation data
 
 validate$hit_distance_sc <- (validate$hit_distance_sc - center_values[1]) / scale_values[1]
@@ -175,74 +178,158 @@ validate$hc_x <- (validate$hc_x - center_values[4]) / scale_values[4]
 
 validate$hc_y <- (validate$hc_y - center_values[5]) / scale_values[5]
 
-# build, test, validate models
+validate$hor_angle <- (validate$hor_angle - center_values[6]) / scale_values[6]
 
-# model hit/no-hit random forest
+### build, test, validate models
 
-# with all variables
+## random forest as classifier
+
+# hit_type ~ hit_speed + hit angle + fieldingTeam + home_team + stand
 
 set.seed(42)
-rf.1 <- randomForest(as.factor(hit) ~ ., data = select(train, -row), ntree = 501, importance = TRUE)
+rf.1.hit_type <- randomForest(hit_type ~ ., data = select(train, hit_type, hit_speed, hit_angle, fieldingTeam, home_team, stand), ntree = 501, importance = TRUE)
 
-print(rf.1)
+print(rf.1.hit_type)
 
-plot(rf.1)
+plot(rf.1.hit_type)
 
-varImpPlot(rf.1)
+varImpPlot(rf.1.hit_type)
 
 # predict values and tune for optimal out of sample accuracy
 
-predict_fit.rf.1 <- data.frame(fits = predict(rf.1, test, type = "prob")[,2], actuals = test$hit)
-pred.rf.1 <- prediction(predict_fit.rf.1$fits, predict_fit.rf.1$actuals)
-roc.pred.rf.1 <- performance(pred.rf.1, measure = "tpr", x.measure = "fpr")
-plot(roc.pred.rf.1)
-abline(a = 0, b = 1)
-rf.1.opt <- opt.cut(roc.pred.rf.1, pred.rf.1)
-rf.1.opt
-rf.1.opt <- rf.1.opt[3]
-predict_fit.rf.1$fits <- with(predict_fit.rf.1, ifelse(fits > rf.1.opt, 1, 0)) 
+predict_fit.rf.1.hit_type <- data.frame(fits = predict(rf.1.hit_type, test, type = "prob"), actuals = test$hit_type)
 
-rf.1_confusion_test <- confusionMatrix(model = rf.1, x = test, y = test$hit)
-rf.1_confusion_validate <- confusionMatrix(model = rf.1, x = validate, y = validate$hit)
-confusionMatrix(df = predict_fit.rf.1)
+rf.1.hit_type_confusion_test <- confusionMatrix(model = rf.1.hit_type, x = test, y = test$hit_type)
 
-# without home_field, stand, or fieldingTeam
+rf.1.hit_type_confusion_validate <- confusionMatrix(model = rf.1.hit_type, x = validate, y = validate$hit_type)
+
+# improve the model by tuning the number of variables tried at each split?
+
+tune.rf.1.hit_type <- tuneRF(train[,c(1:3,9,10)], train[,6], stepFactor = .5, plot = TRUE)
+
+# with mtry = 3
 
 set.seed(42)
-rf.2 <- randomForest(as.factor(hit) ~ ., data = select(train, -row, -home_team, -stand, -fieldingTeam), ntree = 501, importance = TRUE)
+rf.1.hit_type_2 <- randomForest(hit_type ~ ., data = select(train, hit_type, hit_speed, hit_angle, fieldingTeam, home_team, stand), ntree = 501, mtry = 3, importance = TRUE)
 
-print(rf.2) # accuracy does not improve past the selected ntree
+print(rf.1.hit_type_2)
 
-plot(rf.2)
+plot(rf.1.hit_type_2)
 
-varImpPlot(rf.2)
+varImpPlot(rf.1.hit_type_2)
 
-predict_fit.rf.2 <- data.frame(fits = predict(rf.2, test, type = "prob")[,2], actuals = test$hit)
+rf.1.hit_type_2_confusion_test <- confusionMatrix(model = rf.1.hit_type_2, x = test, y = test$hit_type)
 
-pred.rf.2 <- prediction(predict_fit.rf.2$fits, predict_fit.rf.2$actuals)
+rf.1.hit_type_2_confusion_validate <- confusionMatrix(model = rf.1.hit_type_2, x = validate, y = validate$hit_type)
 
-roc.pred.rf.2 <- performance(pred.rf.2, measure = "tpr", x.measure = "fpr")
+# subset where the ball is already known to be a hit
 
-plot(roc.pred.rf.2, colorize = T)
+train_hits <- filter(train, hit_type != 0)
+train_hits$hit_type %<>% as.character()
+train_hits$hit_type %<>% as.factor()
 
-abline(a = 0, b = 1)
+set.seed(42)
+rf.2.hit_type <- randomForest(hit_type ~ ., data = select(train_hits, hit_type, hit_speed, hit_angle, fieldingTeam, home_team, stand), ntree = 501, importance = TRUE)
 
-rf.2.opt <- opt.cut(roc.pred.rf.2, pred.rf.2)
+print(rf.2.hit_type)
 
-rf.2.opt
+plot(rf.2.hit_type)
 
-rf.2.opt <- rf.2.opt[3]
+varImpPlot(rf.2.hit_type)
 
-predict_fit.rf.2$fits <- with(predict_fit.rf.2, ifelse(fits > rf.2.opt, 1, 0)) 
+# predict values and tune for optimal out of sample accuracy
 
-rf.2_confusion_test <- confusionMatrix(model = rf.2, x = test, y = test$hit)
-rf.2_confusion_validate <- confusionMatrix(model = rf.2, x = validate, y = validate$hit)
+test_hits <- filter(test, hit_type != 0)
+test_hits$hit_type %<>% as.character()
+test_hits$hit_type %<>% as.factor()
 
-# rf.2.cv <- rfcv(train[,c(1:5)], as.factor(train[,6]), cv.fold = 5)
+predict_fit.rf.2.hit_type <- data.frame(fits = predict(rf.2.hit_type, test_hits, type = "prob"), actuals = test_hits$hit_type)
 
-# can we improve the model by altering the number of variables randomly tried at each branch?
+rf.2.hit_type_confusion_test <- confusionMatrix(model = rf.2.hit_type, x = test_hits, y = test_hits$hit_type)
 
-tune.rf.2 <- tuneRF(train[,c(1:5)], as.factor(train[,6]), stepFactor = .5, plot = TRUE)
+# improve the model by tuning the number of variables tried at each split?
+# for example, mtry = 3?
+
+set.seed(42)
+rf.2.1.hit_type <- randomForest(hit_type ~ ., data = select(train_hits, hit_type, hit_speed, hit_angle, fieldingTeam, home_team, stand), ntree = 501, mtry = 3, importance = TRUE)
+
+print(rf.2.1.hit_type)
+
+plot(rf.2.1.hit_type)
+
+varImpPlot(rf.2.1.hit_type)
+
+rf.2.1.hit_type_confusion_test <- confusionMatrix(model = rf.2.1.hit_type, x = test_hits, y = test_hits$hit_type)
+
+# no noticeabe advantage to mtry = 3 for either recall, precision, or F1
+
+# how does including the horizontal angle of the ball (at least, where it was picked up) impact the model?
+
+set.seed(42)
+rf.3.hit_type <- randomForest(hit_type ~ ., data = select(train, hit_type, hit_speed, hit_angle, fieldingTeam, home_team, stand, hor_angle), ntree = 501, importance = TRUE)
+
+print(rf.3.hit_type)
+
+plot(rf.3.hit_type)
+
+varImpPlot(rf.3.hit_type)
+
+# predict values and tune for optimal out of sample accuracy
+
+rf.3.hit_type_confusion_test <- confusionMatrix(model = rf.3.hit_type, x = test, y = test$hit_type)
+
+# ## kNN classifier
+# 
+# # create data sets necessary for kNN
+# 
+# knnTrain <- select(train, hit_angle:hit_speed, stand:home_team, hit_type)
+# knnTest <- select(test, hit_angle:hit_speed, stand:home_team, hit_type)
+# 
+# set.seed(42)
+# knn.1.hit_type <- knncat(train = knnTrain, classcol = 6)
+# print(knn.1.hit_type)
+# knn.1.hit_type_predicted <- predict(knn.1.hit_type, knnTrain, knnTest, train.classcol = 6, newdata.classcol = 6)
+# table(knn.1.hit_type_predicted, knnTest$hit_type)
+
+## GAM
+
+set.seed(42)
+gam.1.hit_type <- mgcv::gam(hit_type ~ s(hit_angle, bs='ps') + s(hit_speed, bs='ps') + stand + home_team + fieldingTeam, data = train, family = binomial, method="REML")
+summary(gam.1.hit_type)
+
+predict_gam.1.hit_type <- predict(gam.1.hit_type, newdata = test, type = "response")
+
+gam.1.hit_type_confusion_test <- confusionMatrix(model = gam.1.hit, x = test, y = test$hit_type)
+
+## Naive Bayes
+
+set.seed(42)
+nb.1.hit_type <- naiveBayes(hit_type ~ hit_angle + hit_speed + stand + home_team + fieldingTeam, data = train)
+
+summary(nb.1.hit_type)
+
+table(test$hit_type, predict(nb.1.hit_type, test))
+
+
+
+
+## SVM
+
+set.seed(42)
+svm.1.hit_type <- svm(hit_type ~ hit_angle + hit_speed + stand + home_team + fieldingTeam, type="C-classification", data = train)
+predicted_svm.1.hit_type <- predict(svm.1.hit_type, newdata = test)
+
+table(test$hit_type, predict(svm.1.hit_type, newdata = test))
+
+# tune SVM
+set.seed(42)
+tune_svm <- tune(svm, hit_type ~ hit_angle + hit_speed + stand + home_team + fieldingTeam, data = train, gamma = 2^(-1:1), cost = 2^(2:4))
+summary(tune_svm)
+plot(tune_svm)
+
+## sequential model, using hit/not model first and then applying random forest to only hits
+
+
 
 # with just speed, angle, and distance
 

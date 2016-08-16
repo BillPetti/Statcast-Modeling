@@ -435,7 +435,7 @@ rf.5_plot3
 grid_plot_rf.5 <- grid.arrange(rf.5_plot1, rf.5_plot2, rf.5_plot3, ncol = 3)
 grid_plot_rf.5
 
-ggsave("grid_plot_rf.5.png", grid_plot_rf.5, scale = 1.2, width = 11, height = 8.5, units = "in")
+ggsave("grid_plot_rf.5.png", grid_plot_rf.5rf.5, scale = 1.2, width = 11, height = 8.5, units = "in")
 
 ## predicted probabilities using rf.5
 
@@ -715,13 +715,14 @@ all_prob_detail <- select(all_prob, hit_angle, hit_speed, all_prob)
 all_prob_detail <- all_prob_detail %>%
   mutate(hit_angle = round(hit_angle), hit_speed = round(hit_speed)) %>%
   group_by(hit_angle, hit_speed) %>% 
-  summarize(count = n(), predicted_probability = mean(all_prob)) %>%
-  arrange(desc(hit_angle))
+  summarize(count = n(), predicted_probability = mean(all_prob))
 
 all_prob_detail$predicted_probability <- percent(all_prob_detail$predicted_probability)
 
-all_prob_detail2 <- select(all_prob_detail, -count)
+all_prob_detail2 <- ungroup(all_prob_detail) %>%
+  select(-count) %>%
+  arrange(desc(hit_angle), desc(hit_speed))
 
-names(all_prob_detail2) <- c("Launch Angle Range (degrees)", "Exit Velocity Range (mph)", "Predicted Probability of a Hit")
+names(all_prob_detail2) <- c("Launch Angle (degrees)", "Exit Velocity (mph)", "Predicted Probability of a Hit")
 
 write.csv(all_prob_detail2, "detailed_probability_hit.csv", row.names = FALSE)
