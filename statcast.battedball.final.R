@@ -343,7 +343,7 @@ rf.5_confusion_validate <- confusionMatrix(model = rf.5, x = validate, y = valid
 
 # can we improve the model by altering the number of variables randomly tried at each branch?
 
-tune.rf.2 <- tuneRF(train[,c(2:3, 7:9)], train[,6]), stepFactor = .5, plot = TRUE)
+tune.rf.2 <- tuneRF(train[,c(2:3, 7:9)], train[,6], stepFactor = .5, plot = TRUE)
 
 # mtry = 2 is the optimal number
 
